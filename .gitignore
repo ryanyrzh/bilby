@@ -1,4 +1,6 @@
 .coverage
+.venv/
+.cursor/
 build/
 dist/
 docs/_*
