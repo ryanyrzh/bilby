@@ -27,11 +27,13 @@ class ConversionTest(unittest.TestCase):
         params = dict(
             mass_1=36.0, mass_2=29.0, luminosity_distance=1000.0,
             theta_jn=1.5, phase=2.0, psi=1.0, a_1=0.3, a_2=0.5,
-            delta_iota=0.1, delta_phase=0.2, delta_psi=0.0,
+            delta_iota=0.1, delta_phase=0.2, delta_psi=0.3,
             relative_distance=1.5, relative_mass=1.01, delta_time=0.01,
         )
         p1, p2 = get_lensed_parameter_sets(params)
         self.assertAlmostEqual(p2['theta_jn'], p1['theta_jn'] + 0.1)
+        self.assertAlmostEqual(p2['phase'], p1['phase'] + 0.2)
+        self.assertAlmostEqual(p2['psi'], p1['psi'] + 0.3)
         self.assertAlmostEqual(p2['luminosity_distance'], p1['luminosity_distance'] * 1.5)
 
 

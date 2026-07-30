@@ -22,10 +22,12 @@ class LensingUtilsTest(unittest.TestCase):
             'dL': 1.0,
         }
         plus, minus = get_agn_lensed_parameters(params)
-        for key in ['Mc', 'dL', 'iota', 'phase']:
+        for key in ['Mc', 'dL', 'iota', 'phase', 'psi']:
             self.assertTrue(np.isfinite(plus[key]))
             self.assertTrue(np.isfinite(minus[key]))
         self.assertNotEqual(plus['phase'], minus['phase'])
+        self.assertNotEqual(plus['iota'], minus['iota'])
+        self.assertNotEqual(plus['psi'], minus['psi'])
 
 
 if __name__ == '__main__':
