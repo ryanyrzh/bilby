@@ -19,3 +19,8 @@ MANIFEST
 .idea/*
 bilby/_version.py
 uv.lock
+*.err
+*.out
+*.png
+*.json
+*.pickle
