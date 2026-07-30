@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Compute required network SNR to reach a target Bayes factor (lensed vs unlensed)
+Compute required network SNR to reach a target Bayes factor (lensed vs simple)
 on a Mc x R_orbit grid using full nested-sampling evidence.
 
 Plot layout mirrors gwfast production/compute_SNR_threshold_sddr_Mc.py.
