@@ -207,11 +207,13 @@ def get_agn_lensed_parameters(unlensed_parameters):
 
     plus_image_params['iota'] = lensed_params['iota_p']
     plus_image_params['phase'] = lensed_params['phase_p']
+    plus_image_params['psi'] = lensed_params['psi_p']
     plus_image_params['Mc'] *= plus_redshift_factor
     plus_image_params['dL'] /= lensed_params['sqrt_mu_p']
     plus_image_params['dL'] *= (1 + lensed_params['z_rel_p']) * plus_redshift_factor
     minus_image_params['iota'] = lensed_params['iota_m']
     minus_image_params['phase'] = lensed_params['phase_m']
+    minus_image_params['psi'] = lensed_params['psi_m']
     minus_image_params['Mc'] *= minus_redshift_factor
     minus_image_params['dL'] /= lensed_params['sqrt_mu_m']
     minus_image_params['dL'] *= (1 + lensed_params['z_rel_m']) * minus_redshift_factor
@@ -235,5 +237,6 @@ def convert_simple_PML_to_general_lensed_parameters(parameters):
     output_params['dL_2'] = luminosity_distance / np.sqrt(np.abs(mag_2))
     output_params['delta_iota'] = np.zeros_like(mag_1)
     output_params['delta_phase'] = np.zeros_like(mag_1)
+    output_params['delta_psi'] = np.zeros_like(mag_1)
     output_params['relative_mass'] = np.ones_like(mag_1)
     return output_params

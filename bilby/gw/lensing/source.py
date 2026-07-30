@@ -31,7 +31,10 @@ def _aligned_spin_kwargs():
 def _sum_lensed_waveforms(frequency_array, params_1, params_2, waveform_kwargs):
     """Generate and sum two aligned-spin CBC waveforms with inter-image time delay."""
     for params in (params_1, params_2):
-        if params['mass_1'] <= 0 or params['mass_2'] <= 0:
+        # Reject non-finite / non-positive masses before calling LAL — NaNs
+        # slip past `<= 0` and otherwise spam XLAL/bilby warnings to stderr.
+        m1, m2 = params['mass_1'], params['mass_2']
+        if not (np.isfinite(m1) and np.isfinite(m2) and m1 > 0 and m2 > 0):
             return None
     spin_kwargs = _aligned_spin_kwargs()
     waveform_kwargs = waveform_kwargs.copy()
@@ -66,11 +69,24 @@ def _sum_lensed_waveforms(frequency_array, params_1, params_2, waveform_kwargs):
     if h2 is None:
         return None
 
+    # TODO: double check this
+    # Detector response applies a single psi (image 1). Rotate image-2
+    # polarizations by delta_psi so the relative polarization angle is kept.
+    delta_psi = params_2.get('psi', 0.0) - params_1.get('psi', 0.0)
+    if delta_psi != 0.0:
+        c2 = np.cos(2.0 * delta_psi)
+        s2 = np.sin(2.0 * delta_psi)
+        h2_plus = h2['plus'] * c2 - h2['cross'] * s2
+        h2_cross = h2['plus'] * s2 + h2['cross'] * c2
+    else:
+        h2_plus = h2['plus']
+        h2_cross = h2['cross']
+
     dt_seconds = get_image_time_delay_seconds(params_1, params_2)
     time_shift = np.exp(-1j * 2 * np.pi * frequency_array * dt_seconds)
     return {
-        'plus': h1['plus'] + h2['plus'] * time_shift,
-        'cross': h1['cross'] + h2['cross'] * time_shift,
+        'plus': h1['plus'] + h2_plus * time_shift,
+        'cross': h1['cross'] + h2_cross * time_shift,
     }
 
 
@@ -94,7 +110,7 @@ def general_lensed_binary_black_hole(
     Generic dual-image lensed BBH source model (aligned spins, IMRPhenomD).
 
     Lensing is parameterized by phenomenological deltas relative to the
-    primary (plus) image.
+    plus image.
     """
     waveform_kwargs = DEFAULT_WAVEFORM_KWARGS.copy()
     waveform_kwargs.update(_pop_extrinsic_kwargs(kwargs))
@@ -122,7 +138,7 @@ def agn_lensed_binary_black_hole(
     """
     AGN-embedded lensed BBH source model (aligned spins, IMRPhenomD).
 
-    Uses AGN disk physics from lensing_utils to produce two lensed images.
+    Uses AGN disk geometry from lensing_utils to produce two lensed images.
     """
     waveform_kwargs = DEFAULT_WAVEFORM_KWARGS.copy()
     waveform_kwargs.update(_pop_extrinsic_kwargs(kwargs))

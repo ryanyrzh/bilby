@@ -7,6 +7,7 @@ from ..conversion import (
     chirp_mass_and_mass_ratio_to_component_masses,
     component_masses_to_chirp_mass,
     component_masses_to_symmetric_mass_ratio,
+    symmetric_mass_ratio_to_mass_ratio,
 )
 from .lensing_utils import DAY_TO_SEC, get_agn_lensed_parameters
 
@@ -20,6 +21,12 @@ def mpc_to_gpc(luminosity_distance_mpc):
 
 def gpc_to_mpc(luminosity_distance_gpc):
     return luminosity_distance_gpc * GPC_TO_MPC
+
+
+def chirp_mass_and_eta_to_component_masses(chirp_mass, eta):
+    """Convert chirp mass and symmetric mass ratio to component masses."""
+    mass_ratio = symmetric_mass_ratio_to_mass_ratio(eta)
+    return chirp_mass_and_mass_ratio_to_component_masses(chirp_mass, mass_ratio)
 
 
 def bilby_to_gwfast_params(parameters):
@@ -45,8 +52,8 @@ def bilby_to_gwfast_params(parameters):
 
 
 def gwfast_image_to_bilby_params(image_params, base_parameters):
-    """Convert one gwfast image parameter dict to bilby waveform parameters."""
-    mass_1, mass_2 = chirp_mass_and_mass_ratio_to_component_masses(
+    """Convert gwfast parameters to bilby parameters (for one image)."""
+    mass_1, mass_2 = chirp_mass_and_eta_to_component_masses(
         image_params['Mc'], image_params['eta'])
     out = dict(base_parameters)
     out.update({
@@ -190,17 +197,28 @@ def convert_agn_to_generic_lensed(parameters):
         'phase': params_1['phase'],
         'delta_phase': params_2['phase'] - params_1['phase'],
         'psi': params_1['psi'],
-        'delta_psi': params_2.get('psi', params_1['psi']) - params_1['psi'],
+        'delta_psi': params_2['psi'] - params_1['psi'],
         'Mc': params_1['Mc'],
+        'eta': params_1['eta'],
         'relative_mass': params_2['Mc'] / params_1['Mc'],
     })
     return output_params
 
+def convert_agn_to_simple_lensed(parameters):
+    """Convert AGN lensed parameters to simple lensing parameters."""
+    output_params = convert_agn_to_generic_lensed(parameters)
+    output_params.update({
+        'delta_iota': 0.0,
+        'delta_phase': 0.0,
+        'delta_psi': 0.0,
+        'relative_mass': 1.0,
+    })
+    return output_params
 
 def generic_gwfast_to_bilby_lensed(generic_gwfast_params, base_bilby_params):
     """Convert generic gwfast lensing params to bilby params for waveform generation."""
     bilby_params = dict(base_bilby_params)
-    mass_1, mass_2 = chirp_mass_and_mass_ratio_to_component_masses(
+    mass_1, mass_2 = chirp_mass_and_eta_to_component_masses(
         generic_gwfast_params['Mc'], generic_gwfast_params['eta'])
     bilby_params.update({
         'mass_1': mass_1,
