@@ -14,6 +14,11 @@ MTSUN_SI = gravitational_constant * solar_mass / speed_of_light ** 3  # seconds
 uGpc = 3.085677581491367278913937957796471611e25  # metres
 DAY_TO_SEC = 3600.0 * 24.0
 
+# Numerical guards
+MIN_WAVEFORM_R_ORBIT = 2.0 # Minimum R_orbit allowed in the prior, prevents velocity blow-up
+_EDGE_ON_COS_EPS = 1e-8 # cos(iota) smaller than this sets the waveform to inf
+_ARG_CLIP = 1.0 # Trig functions return nan for |x| > 1
+
 zGridGlob = np.logspace(start=-6, stop=5, base=10, num=7000)
 dLGridGlob = cosmo.luminosity_distance(zGridGlob).value / 1000.0  # Gpc
 
@@ -40,7 +45,15 @@ def einstein_angle(lens_mass_source, angular_D_L, D_LS):
 
 
 def get_phi_L(iota, y_src_pos, phi_N):
-    arg = np.sqrt(1 - y_src_pos ** 2) / np.sin(iota)
+    sin_iota = np.sin(iota)
+    if not np.isfinite(sin_iota) or np.abs(sin_iota) < 1e-15:
+        return np.nan
+    inside = 1.0 - y_src_pos ** 2
+    if inside < 0:
+        return np.nan
+    arg = np.sqrt(inside) / sin_iota
+    if np.abs(arg) > _ARG_CLIP:
+        return np.nan
     return phi_N - np.sign(y_src_pos) * np.arccos(arg)
 
 
@@ -128,6 +141,18 @@ def get_agn_lens_angles(
     return theta_E, beta, lens_mass_source
 
 
+def _psi_perturbation_term(iota, delta_phi):
+    """Equivalent to sin(ι) sqrt(tan²ι + 1/sin²δφ) without tan(ι)."""
+    sin_iota = np.sin(iota)
+    cos_iota = np.cos(iota)
+    sin_dphi = np.sin(delta_phi)
+    if np.abs(sin_dphi) < 1e-15:
+        return np.nan
+    if np.abs(cos_iota) < _EDGE_ON_COS_EPS:
+        return np.inf
+    return np.sqrt(sin_iota ** 4 / cos_iota ** 2 + sin_iota ** 2 / sin_dphi ** 2)
+
+
 def compute_lensed_angles_approx(agn_bbh_system_params, angular_distances=False):
     parameters = agn_bbh_system_params.copy()
     iota = parameters["iota"]
@@ -135,6 +160,15 @@ def compute_lensed_angles_approx(agn_bbh_system_params, angular_distances=False)
     psi = parameters["psi"]
     r_orbit = parameters["R_orbit"]
     y_src = parameters["src_pos"]
+
+    if not np.isfinite(r_orbit) or r_orbit < MIN_WAVEFORM_R_ORBIT:
+        return None
+    if np.abs(y_src) > 1.0:
+        return None
+
+    v_orb = Keplerian_speed(r_orbit)
+    if not np.isfinite(v_orb) or v_orb >= 1.0:
+        return None
 
     phi_N = np.pi / 2 - phase
 
@@ -149,23 +183,34 @@ def compute_lensed_angles_approx(agn_bbh_system_params, angular_distances=False)
     theta_bar_m = alpha_hat - (img_pos_2 + beta)
 
     delta_phi = -get_phi_L(iota, y_src, 0)
+    if not np.isfinite(delta_phi):
+        return None
 
-    inv_delta = (np.cos(iota) ** 2 + np.sin(iota) ** 2 * np.sin(delta_phi) ** 2) ** -0.5
+    sin_iota = np.sin(iota)
+    if np.abs(sin_iota) < 1e-15:
+        return None
+
+    inv_delta = (np.cos(iota) ** 2 + sin_iota ** 2 * np.sin(delta_phi) ** 2) ** -0.5
     iota_term = np.cos(iota) * np.cos(delta_phi) * inv_delta
-    phi_term = np.sin(delta_phi) / np.sin(iota) * inv_delta
-    psi_term = np.sin(iota) * np.sqrt(np.tan(iota) ** 2 + 1 / np.sin(delta_phi) ** 2)
-    speed_term = np.sin(iota) * np.cos(delta_phi) * inv_delta
+    phi_term = np.sin(delta_phi) / sin_iota * inv_delta
+    psi_term = _psi_perturbation_term(iota, delta_phi)
+    speed_term = sin_iota * np.cos(delta_phi) * inv_delta
 
     iota_p = iota - theta_bar_p * iota_term
     iota_m = iota + theta_bar_m * iota_term
     phi_p = phi_N + theta_bar_p * phi_term
     phi_m = phi_N - theta_bar_m * phi_term
-    psi_p = psi + theta_bar_p / psi_term
-    psi_m = psi + theta_bar_m / psi_term
+    if not np.isfinite(psi_term):
+        return None
+    if np.isinf(psi_term):
+        psi_p = psi
+        psi_m = psi
+    else:
+        psi_p = psi + theta_bar_p / psi_term
+        psi_m = psi + theta_bar_m / psi_term
 
-    v_orb = Keplerian_speed(r_orbit)
     gamma = Lorentz_factor(v_orb)
-    v_proj = -v_orb * np.sin(iota) * np.sin(delta_phi)
+    v_proj = -v_orb * sin_iota * np.sin(delta_phi)
     v_orb_p = v_proj * (1 + theta_bar_p * speed_term)
     v_orb_m = v_proj * (1 - theta_bar_m * speed_term)
 
@@ -174,11 +219,11 @@ def compute_lensed_angles_approx(agn_bbh_system_params, angular_distances=False)
     z_grav = gravitational_redshift(r_orbit)
 
     delta_time, mu_p, mu_m = PML_time_delay_magnification(beta, theta_E)
-    delta_time *= lens_mass_src * MTSUN_SI / DAY_TO_SEC
+    delta_time *= lens_mass_src * MTSUN_SI
     sqrt_mu_p = np.sqrt(np.abs(mu_p))
     sqrt_mu_m = np.sqrt(np.abs(mu_m))
 
-    return {
+    out = {
         'iota_p': iota_p,
         'iota_m': iota_m,
         'phase_p': np.pi / 2 - phi_p,
@@ -194,6 +239,9 @@ def compute_lensed_angles_approx(agn_bbh_system_params, angular_distances=False)
         'sqrt_mu_p': sqrt_mu_p,
         'sqrt_mu_m': sqrt_mu_m,
     }
+    if not all(np.isfinite(v) for v in out.values()):
+        return None
+    return out
 
 
 def get_agn_lensed_parameters(unlensed_parameters):
@@ -201,6 +249,8 @@ def get_agn_lensed_parameters(unlensed_parameters):
     minus_image_params = unlensed_parameters.copy()
 
     lensed_params = compute_lensed_angles_approx(unlensed_parameters)
+    if lensed_params is None:
+        return None, None
 
     plus_redshift_factor = (1 + lensed_params['z_rel_p']) * (1 + lensed_params['z_grav'])
     minus_redshift_factor = (1 + lensed_params['z_rel_m']) * (1 + lensed_params['z_grav'])
@@ -217,7 +267,7 @@ def get_agn_lensed_parameters(unlensed_parameters):
     minus_image_params['Mc'] *= minus_redshift_factor
     minus_image_params['dL'] /= lensed_params['sqrt_mu_m']
     minus_image_params['dL'] *= (1 + lensed_params['z_rel_m']) * minus_redshift_factor
-    minus_image_params['tcoal'] += lensed_params['delta_time']
+    minus_image_params['tcoal'] += lensed_params['delta_time'] / DAY_TO_SEC
 
     return plus_image_params, minus_image_params
 
@@ -232,11 +282,11 @@ def convert_simple_PML_to_general_lensed_parameters(parameters):
     )
     time_delay, mag_1, mag_2 = PML_time_delay_magnification(beta_src=beta, theta_E=theta_E)
 
-    output_params['delta_time'] = time_delay * lens_mass_src * MTSUN_SI / DAY_TO_SEC
+    output_params['delta_time'] = time_delay * lens_mass_src * MTSUN_SI
     output_params['dL_1'] = luminosity_distance / np.sqrt(np.abs(mag_1))
     output_params['dL_2'] = luminosity_distance / np.sqrt(np.abs(mag_2))
     output_params['delta_iota'] = np.zeros_like(mag_1)
-    output_params['delta_phase'] = np.zeros_like(mag_1)
+    output_params['delta_phi_12'] = np.zeros_like(mag_1)
     output_params['delta_psi'] = np.zeros_like(mag_1)
     output_params['relative_mass'] = np.ones_like(mag_1)
     return output_params

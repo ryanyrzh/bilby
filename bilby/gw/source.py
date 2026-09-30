@@ -1342,7 +1342,7 @@ measured_spin = {
     "chi_1", "chi_2", "a_1", "a_2", "chi_1_in_plane"
 }
 lensing = {
-    "delta_iota", "delta_phase", "delta_psi", "relative_distance",
+    "delta_iota", "delta_phi_12", "delta_psi", "relative_distance",
     "relative_mass", "delta_time", "R_orbit", "log10_M_lz", "src_pos",
 }
 

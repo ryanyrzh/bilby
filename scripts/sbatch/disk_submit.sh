@@ -1,6 +1,7 @@
 #!/bin/bash
-# Submit {agn, generic, simple} PE jobs in parallel, then gather with afterok dependency.
-# All PE results and SLURM logs go under OUTDIR/LABEL/ (default: outdir_lensing/nolabel/).
+# Submit fixed-binary {agn, generic, simple} PE jobs in parallel, then gather
+# with an afterok dependency.
+# All PE results and SLURM logs go under OUTDIR/LABEL/.
 #
 # Env overrides (exported into PE/comparison jobs):
 #   NLIVE DURATION OUTDIR LABEL SAMPLE DLOGZ MAXCALL EXTRA_FLAGS
@@ -9,12 +10,12 @@ set -euo pipefail
 
 cd /home/yzhan629/bilby
 
-export NLIVE=${NLIVE:-50}
+export NLIVE=${NLIVE:-1000}
 export DURATION=${DURATION:-32}
-export DLOGZ=${DLOGZ:-1}
+export DLOGZ=${DLOGZ:-0.1}
 export SAMPLE=${SAMPLE:-acceptance-walk}
-export OUTDIR=${OUTDIR:-outdir_lensing}
-export LABEL=${LABEL:-n50_dz1_dur32}
+export OUTDIR=${OUTDIR:-outdir_disk}
+export LABEL=${LABEL:-n1000_dz0.1_dur32}
 export EXTRA_FLAGS=${EXTRA_FLAGS:---no-check-point-plot}
 export MAXCALL=${MAXCALL:-}
 RUN_DIR="${OUTDIR}/${LABEL}"
@@ -32,18 +33,18 @@ submit_pe() {
         scripts/sbatch/lensing_pe.sbatch
 }
 
-JOB_AGN=$(submit_pe agn)
-JOB_GEN=$(submit_pe generic)
-JOB_SIM=$(submit_pe simple)
+JOB_AGN=$(submit_pe agn_disk)
+JOB_GEN=$(submit_pe generic_disk)
+JOB_SIM=$(submit_pe simple_disk)
 
 JOB_COMPARISON=$(sbatch --parsable \
     --dependency="afterok:${JOB_AGN}:${JOB_GEN}:${JOB_SIM}" \
     --output="${RUN_DIR}/%x_%j.out" \
     --error="${RUN_DIR}/%x_%j.err" \
     --export="${EXPORT_VARS}" \
-    scripts/sbatch/lensing_comparison.sbatch)
+    scripts/sbatch/disk_comparison.sbatch)
 
-echo "  agn_pe           -> ${JOB_AGN}" >&2
-echo "  generic_pe       -> ${JOB_GEN}" >&2
-echo "  simple_pe        -> ${JOB_SIM}" >&2
-echo "  comparison       -> ${JOB_COMPARISON} (afterok: ${JOB_AGN}, ${JOB_GEN}, ${JOB_SIM})" >&2
+echo "  agn_disk_pe      -> ${JOB_AGN}" >&2
+echo "  generic_disk_pe  -> ${JOB_GEN}" >&2
+echo "  simple_disk_pe   -> ${JOB_SIM}" >&2
+echo "  disk_comparison  -> ${JOB_COMPARISON} (afterok: ${JOB_AGN}, ${JOB_GEN}, ${JOB_SIM})" >&2

@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=lensing_pe
-#SBATCH --partition=parallel
+#SBATCH --partition=shared
 #SBATCH --account=mkamion1
 #SBATCH --output=outdir_lensing/%x_%j.out
 #SBATCH --error=outdir_lensing/%x_%j.err
-#SBATCH --time=4:00:00
-#SBATCH --cpus-per-task=48
-#SBATCH --mem=32G
+#SBATCH --time=01-00:00:00
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=128G
 #SBATCH --ntasks=1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=yzhan629@jh.edu
@@ -19,12 +19,12 @@ set -euo pipefail
 source /home/yzhan629/bilby/scripts/sbatch/common_env.sh
 
 MODEL=${MODEL:?Set MODEL to agn, generic, or simple}
-NLIVE=${NLIVE:-100}
-DURATION=${DURATION:-16}
+NLIVE=${NLIVE:-1000}
+DURATION=${DURATION:-32}
 OUTDIR=${OUTDIR:-outdir_lensing}
-LABEL=${LABEL:-n100_dz1}
+LABEL=${LABEL:-n1000_dz0.1_dur32}
 SAMPLE=${SAMPLE:-acceptance-walk}
-DLOGZ=${DLOGZ:-1}
+DLOGZ=${DLOGZ:-0.1}
 MAXCALL=${MAXCALL:-}
 EXTRA_FLAGS=${EXTRA_FLAGS:---no-check-point-plot}
 

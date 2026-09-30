@@ -1,9 +1,23 @@
 #!/usr/bin/env python
-"""Simple-lensed PE with AGN-injected data (model comparison suite)."""
+"""
+Recover simple image parameters with the binary held fixed.
+
+Samples only relative_distance and delta_time. relative_mass and the
+inter-image angle shifts stay at the simple-model defaults. Every other CBC
+parameter is pinned to the image-1 parameters converted from the AGN
+injection. Coalescence time stays free in a narrow window: the lensing delay
+cannot absorb a millisecond time-origin offset. The data are the AGN injection.
+"""
 import argparse
 import os
 
+import numpy as np
+
 from bilby.core.utils import random
+from bilby.gw.conversion import (
+    component_masses_to_chirp_mass,
+    component_masses_to_mass_ratio,
+)
 from bilby.gw.likelihood import GravitationalWaveTransient
 from bilby.gw.lensing import (
     DEFAULT_SEGMENT_DURATION,
@@ -14,16 +28,45 @@ from bilby.gw.lensing import (
     general_lensed_binary_black_hole,
     generic_gwfast_to_bilby_lensed,
     make_waveform_generator,
+    network_snr,
     plot_lensing_corner,
-    print_component_masses,
     reference_bilby_injection,
     run_pe,
     set_example_pe_time_prior,
 )
 
+LENS_PARAMETERS = ('relative_distance', 'delta_time')
+
 
 def _default_npool():
     return int(os.environ.get('SLURM_CPUS_PER_TASK', '1'))
+
+
+def _fixed_binary_parameters(injection):
+    """Sampled CBC values corresponding to the converted image-1 injection."""
+    fixed = dict(injection)
+    if 'chirp_mass' not in fixed or 'mass_ratio' not in fixed:
+        fixed['chirp_mass'] = component_masses_to_chirp_mass(
+            injection['mass_1'], injection['mass_2'])
+        fixed['mass_ratio'] = component_masses_to_mass_ratio(
+            injection['mass_1'], injection['mass_2'])
+    if 'chi_1' not in fixed:
+        fixed['chi_1'] = injection['a_1'] * np.cos(injection.get('tilt_1', 0.0))
+    if 'chi_2' not in fixed:
+        fixed['chi_2'] = injection['a_2'] * np.cos(injection.get('tilt_2', 0.0))
+    return fixed
+
+
+def _pin_binary(priors, injection):
+    """Replace every non-lens, non-time sampled parameter with the injection."""
+    fixed = _fixed_binary_parameters(injection)
+    for key in list(priors.non_fixed_keys):
+        if key in LENS_PARAMETERS or key == 'geocent_time':
+            continue
+        if key not in fixed:
+            raise KeyError(f'No injection value for sampled parameter {key}')
+        priors[key] = float(fixed[key])
+    priors.convert_floats_to_delta_functions()
 
 
 def main():
@@ -54,26 +97,29 @@ def main():
     print(f'Using npool={args.npool}')
 
     agn_injection = reference_bilby_injection()
-    print('AGN injection parameters (data):')
-    for key, value in sorted(agn_injection.items()):
-        print(f'  {key}: {value}')
-
     simple_gwfast = convert_agn_to_simple_lensed(agn_injection)
     recovery_parameters = generic_gwfast_to_bilby_lensed(simple_gwfast, agn_injection)
-    print('Simple lensing injection parameters (converted from AGN):')
+    print('Simple lensing recovery truth (converted from AGN):')
     for key, value in sorted(recovery_parameters.items()):
         print(f'  {key}: {value}')
 
-    ifos, _ = build_injection_ifos(
+    ifos, agn_wfg = build_injection_ifos(
         agn_injection,
         duration=args.duration,
         sampling_frequency=args.sampling_frequency,
         source_model=agn_lensed_binary_black_hole,
     )
+    print(f'Network SNR: {network_snr(ifos, agn_injection, agn_wfg):.1f}')
     duration = ifos[0].strain_data.duration
 
     priors = SimpleLensedPriorDict(duration=duration)
     set_example_pe_time_prior(priors, agn_injection['geocent_time'])
+    _pin_binary(priors, recovery_parameters)
+    print(f'Sampling: {list(priors.non_fixed_keys)}')
+    print('Fixed:')
+    for key in priors.fixed_keys:
+        print(f'  {key}: {priors[key].peak}')
+
     wfg = make_waveform_generator(
         general_lensed_binary_black_hole, duration, args.sampling_frequency)
     likelihood = GravitationalWaveTransient(
@@ -85,7 +131,7 @@ def main():
         time_marginalization=False,
     )
     result = run_pe(
-        likelihood, priors, args.outdir, f'{args.label}_simple',
+        likelihood, priors, args.outdir, f'{args.label}_simple_disk',
         injection_parameters=recovery_parameters,
         nlive=args.nlive, npool=args.npool,
         dlogz=args.dlogz, maxcall=args.maxcall,
@@ -94,7 +140,6 @@ def main():
         check_point_plot=args.check_point_plot,
         resume=args.resume,
     )
-    print_component_masses(result)
     if args.plot_corner:
         plot_lensing_corner(result, dpi=100)
 

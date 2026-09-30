@@ -65,10 +65,10 @@ def gwfast_image_to_bilby_params(image_params, base_parameters):
         'psi': image_params.get('psi', out.get('psi', 0.0)),
         'a_1': image_params.get('chi1z', out.get('a_1', 0.0)),
         'a_2': image_params.get('chi2z', out.get('a_2', 0.0)),
-        'tilt_1': 0.0,
-        'tilt_2': 0.0,
-        'phi_12': 0.0,
-        'phi_jl': 0.0,
+        'tilt_1': out.get('tilt_1', 0.0),
+        'tilt_2': out.get('tilt_2', 0.0),
+        'phi_12': out.get('phi_12', 0.0),
+        'phi_jl': out.get('phi_jl', 0.0),
     })
     if 'tcoal' in image_params:
         out['tcoal_days'] = image_params['tcoal']
@@ -99,7 +99,7 @@ def _get_parameter_pairs(key, reference_parameters, mode):
             elif mode == 'delta' and key == 'theta_jn':
                 variation = reference_parameters.pop('delta_iota', None)
             elif mode == 'delta' and key == 'phase':
-                variation = reference_parameters.pop('delta_phase', None)
+                variation = reference_parameters.pop('delta_phi_12', None)
             elif mode == 'delta' and key == 'psi':
                 variation = reference_parameters.pop('delta_psi', None)
             elif mode == 'relative' and key == 'luminosity_distance':
@@ -111,6 +111,8 @@ def _get_parameter_pairs(key, reference_parameters, mode):
         if mode == 'relative':
             param_2 = param_1 * variation
         elif mode == 'delta':
+            if key == 'tcoal_days':
+                variation = variation / DAY_TO_SEC
             param_2 = param_1 + variation
 
     return param_1, param_2
@@ -121,6 +123,8 @@ def get_lensed_parameter_sets(parameters_dict):
     Split bilby parameters into two image parameter sets.
 
     Supports paired (param_1/param_2) or delta/relative forms.
+    ``delta_time`` is in seconds and is added to ``tcoal_days`` after
+    conversion to days.
     """
     ref_parameters_dict = parameters_dict.copy()
     theta_jn_1, theta_jn_2 = _get_parameter_pairs('theta_jn', ref_parameters_dict, 'delta')
@@ -142,14 +146,14 @@ def get_lensed_parameter_sets(parameters_dict):
     if theta_jn_2 is None:
         theta_jn_2 = theta_jn_1 + parameters_dict.get('delta_iota', 0.0)
     if phase_2 is None:
-        phase_2 = phase_1 + parameters_dict.get('delta_phase', 0.0)
+        phase_2 = phase_1 + parameters_dict.get('delta_phi_12', 0.0)
     if psi_2 is None:
         psi_2 = psi_1 + parameters_dict.get('delta_psi', 0.0)
     if distance_2 is None:
         distance_2 = distance_1 * parameters_dict.get('relative_distance', 1.0)
 
     lensing_keys = {
-        'delta_iota', 'delta_phase', 'delta_psi', 'relative_distance',
+        'delta_iota', 'delta_phi_12', 'delta_psi', 'relative_distance',
         'relative_mass', 'delta_time', 'R_orbit', 'log10_M_lz', 'src_pos',
     }
     base = {k: v for k, v in parameters_dict.items() if k not in lensing_keys}
@@ -175,27 +179,31 @@ def get_lensed_parameter_sets(parameters_dict):
         'luminosity_distance': distance_2,
         'tcoal_days': (
             parameters_dict.get('tcoal_days', 0.0)
-            + parameters_dict.get('delta_time', 0.0)),
+            + parameters_dict.get('delta_time', 0.0) / DAY_TO_SEC),
     })
 
     return signal_1_params, signal_2_params
 
 
 def convert_agn_to_generic_lensed(parameters):
-    """Convert AGN lensed parameters to generic lensing delta parameters."""
+    """Convert AGN lensed parameters to generic lensing delta parameters.
+
+    ``delta_time`` is the inter-image delay in seconds. ``tcoal`` stays in days.
+    """
     gwfast_params = bilby_to_gwfast_params(parameters)
     params_1, params_2 = get_agn_lensed_parameters(gwfast_params)
 
     output_params = bilby_to_gwfast_params(parameters)
     output_params['tcoal'] = params_1.get('tcoal', 0.0)
-    output_params['delta_time'] = params_2['tcoal'] - params_1.get('tcoal', 0.0)
+    output_params['delta_time'] = (
+        params_2['tcoal'] - params_1.get('tcoal', 0.0)) * DAY_TO_SEC
     output_params.update({
         'dL': params_1['dL'],
         'relative_distance': params_2['dL'] / params_1['dL'],
         'iota': params_1['iota'],
         'delta_iota': params_2['iota'] - params_1['iota'],
         'phase': params_1['phase'],
-        'delta_phase': params_2['phase'] - params_1['phase'],
+        'delta_phi_12': params_2['phase'] - params_1['phase'],
         'psi': params_1['psi'],
         'delta_psi': params_2['psi'] - params_1['psi'],
         'Mc': params_1['Mc'],
@@ -209,26 +217,33 @@ def convert_agn_to_simple_lensed(parameters):
     output_params = convert_agn_to_generic_lensed(parameters)
     output_params.update({
         'delta_iota': 0.0,
-        'delta_phase': 0.0,
+        'delta_phi_12': 0.0,
         'delta_psi': 0.0,
         'relative_mass': 1.0,
     })
     return output_params
 
 def generic_gwfast_to_bilby_lensed(generic_gwfast_params, base_bilby_params):
-    """Convert generic gwfast lensing params to bilby params for waveform generation."""
+    """Convert generic gwfast lensing params to bilby injection params.
+
+    Masses are chirp_mass and mass_ratio. Waveform generation converts those
+    to mass_1 and mass_2.
+    """
     bilby_params = dict(base_bilby_params)
-    mass_1, mass_2 = chirp_mass_and_eta_to_component_masses(
-        generic_gwfast_params['Mc'], generic_gwfast_params['eta'])
+    bilby_params.pop('mass_1', None)
+    bilby_params.pop('mass_2', None)
     bilby_params.update({
-        'mass_1': mass_1,
-        'mass_2': mass_2,
+        'chirp_mass': generic_gwfast_params['Mc'],
+        'mass_ratio': symmetric_mass_ratio_to_mass_ratio(
+            generic_gwfast_params['eta']),
         'luminosity_distance': gpc_to_mpc(generic_gwfast_params['dL']),
         'theta_jn': generic_gwfast_params['iota'],
         'phase': generic_gwfast_params['phase'],
         'psi': generic_gwfast_params.get('psi', bilby_params.get('psi', 0.0)),
+        'tilt_1': bilby_params.get('tilt_1', 0.0),
+        'tilt_2': bilby_params.get('tilt_2', 0.0),
         'delta_iota': generic_gwfast_params.get('delta_iota', 0.0),
-        'delta_phase': generic_gwfast_params.get('delta_phase', 0.0),
+        'delta_phi_12': generic_gwfast_params.get('delta_phi_12', 0.0),
         'delta_psi': generic_gwfast_params.get('delta_psi', 0.0),
         'relative_distance': generic_gwfast_params.get('relative_distance', 1.0),
         'relative_mass': generic_gwfast_params.get('relative_mass', 1.0),

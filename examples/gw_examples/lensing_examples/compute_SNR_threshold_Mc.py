@@ -25,7 +25,7 @@ parser.add_argument('--model', type=str, default='agn', choices=['agn', 'generic
 parser.add_argument('--logB', type=float, default=2.0, help='Target log10(BF).')
 parser.add_argument('--steps', type=int, default=2, help='Newton steps on luminosity_distance.')
 parser.add_argument('--nlive', type=int, default=50, help='Dynesty live points.')
-parser.add_argument('--duration', type=float, default=4.0)
+parser.add_argument('--duration', type=float, default=32.0)
 parser.add_argument('--sampling-frequency', type=float, default=2048.0)
 parser.add_argument('--label', type=str, default=None)
 parser.add_argument('--outdir', type=str, default='output')
